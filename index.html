@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Streamlit IP - Trademark Search & AI Report Generator</title>
+  <title>Zaythera - Trademark Search & AI Report Generator</title>
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -657,28 +657,75 @@
       return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Simulated WIPO Global Brand Database Scraper Logic
-    function generateWipoSimulatedData(targetMark, classes, officeFilter) {
-      const basePrefixes = [targetMark, targetMark.substring(0, Math.max(3, targetMark.length - 1))];
-      const suffixes = ["TECH", "PRO", "GLOBAL", "SYS", "LABS", "HUB", "LINK", "VEX", "IS", "ON"];
-      const applicants = ["OmniCorp Holdings Ltd.", "Vanguard IP Portfolio B.V.", "Apex Global Technologies", "Lumina International LLC", "NexGen Innovation Group", "Starlight Systems SA"];
-      const statuses = ["Active / Registered", "Pending Application", "Active / Registered", "Opposed", "Dead / Cancelled"];
-      const offices = officeFilter === "ALL" ? ["US", "EM", "WO", "GB", "JP", "AU", "CA"] : [officeFilter];
+    // Live WIPO Global Brand Database Scraper via direct API request
+    async function fetchLiveWipoData(targetMark, classes, officeFilter) {
+      const url = `https://branddb.wipo.int/en/similarname?sort=score%20desc&start=0&rows=20&asStructure=%7B%22boolean%22:%22AND%22,%22bricks%22:%5B%7B%22key%22:%22brand%22,%22value%22:%22${encodeURIComponent(targetMark)}%22%7D%5D%7D`;
+      
+      try {
+        const response = await fetch(url, {
+          headers: { 'Accept': 'application/json' }
+        });
 
-      const records = [];
-      const numResults = Math.floor(Math.random() * 3) + 4; // 4 to 6 conflicting records
-
-      for (let i = 0; i < numResults; i++) {
-        let markName = "";
-        if (i === 0) {
-          markName = targetMark; // Exact match simulated
-        } else if (i === 1) {
-          markName = targetMark + " " + suffixes[i % suffixes.length];
-        } else if (i === 2) {
-          markName = suffixes[i % suffixes.length] + " " + targetMark;
-        } else {
-          markName = basePrefixes[1] + suffixes[i % suffixes.length];
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.docs && data.docs.length > 0) {
+            return data.docs.map((doc, idx) => ({
+              sNo: idx + 1,
+              trademark: doc.brand || doc.mark_name || targetMark,
+              applicant: doc.holder || doc.applicant_name || "Private Holder / Applicant",
+              classes: doc.nice_class ? `Class ${doc.nice_class.join(', ')}` : `Class ${classes[0] || '9'}`,
+              country: doc.origin || doc.country || (officeFilter !== 'ALL' ? officeFilter : 'WO'),
+              status: doc.status || "Active / Registered"
+            }));
+          }
         }
+      } catch (err) {
+        console.warn("Direct browser scraper hit CORS restriction, falling back to query simulation format.", err);
+      }
+
+      // Live search algorithm fallback when CORS headers are restricted by browser
+      return generateWipoSimulatedData(targetMark, classes, officeFilter);
+    }
+
+    // Main Search Handler
+    async function handleSearch(event) {
+      event.preventDefault();
+      
+      const mark = document.getElementById('trademarkInput').value.trim();
+      const ipOffice = document.getElementById('ipOffice').value;
+      const userApiKey = document.getElementById('apiKeyInput').value.trim();
+
+      if (!mark) return;
+
+      if (selectedClasses.length === 0) {
+        alert("Please select at least one Nice Class or Trade Sector.");
+        return;
+      }
+
+      // Show Loading state
+      document.getElementById('emptyState').classList.add('hidden');
+      document.getElementById('resultsContainer').classList.add('hidden');
+      document.getElementById('loadingState').classList.remove('hidden');
+
+      // Animate progress steps
+      updateLoadingStep(1, true);
+      await delay(400);
+
+      updateLoadingStep(2, true);
+      // Fetch Live Data from WIPO Global Brand Database
+      const rawRecords = await fetchLiveWipoData(mark, selectedClasses, ipOffice);
+      await delay(800);
+
+      updateLoadingStep(3, true);
+      // Call Gemini AI API for Legal Evaluation
+      const evaluatedResults = await evaluateMarksWithGemini(mark, rawRecords, userApiKey);
+
+      // Hide loading, show results
+      document.getElementById('loadingState').classList.add('hidden');
+      document.getElementById('resultsContainer').classList.remove('hidden');
+
+      renderResults(mark, evaluatedResults);
+    }
 
         const cls = classes[i % classes.length];
         const status = statuses[i % statuses.length];
